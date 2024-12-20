@@ -32,3 +32,42 @@ drive.mount('/content/drive')
 # Đọc dữ liệu sản phẩm và đánh giá
 product_data = pd.read_csv('/content/drive/MyDrive/Data/products.csv')
 reviews_data = pd.read_csv('/content/drive/MyDrive/Data/reviews.csv')
+
+# Xử lý NaN
+product_data = product_data.fillna('')
+reviews_data = reviews_data.fillna('')
+
+# Đảm bảo các cột có kiểu dữ liệu đồng nhất
+product_data = product_data.astype(str)
+reviews_data = reviews_data.astype(str)
+
+user_ids = reviews_data["user"].unique().astype(str)
+user_ids = np.array(user_ids)  # Đảm bảo user_ids là một mảng numpy
+print("User IDs:", user_ids)
+
+product_ids = product_data["productId"].unique().astype(str)
+product_ids = np.array(product_ids)  # Đảm bảo product_ids là một mảng numpy
+print("Product IDs:", product_ids)
+
+brands = product_data["brand"].unique().astype(str)
+categories = product_data["category"].unique().astype(str)
+classifies = product_data["classify"].unique().astype(str)
+
+# Tạo các đối tượng StringLookup cho userId và productId
+user_id_lookup = StringLookup(vocabulary=user_ids, mask_token=None)
+product_id_lookup = StringLookup(vocabulary=product_ids, mask_token=None)
+brand_lookup = StringLookup(vocabulary=brands, mask_token=None)
+category_lookup = StringLookup(vocabulary=categories, mask_token=None)
+classify_lookup = StringLookup(vocabulary=classifies, mask_token=None)
+
+# Chuyển đổi và mã hóa dữ liệu reviews_data
+reviews_data["user_id_encoded"] = user_id_lookup(reviews_data["user"])
+reviews_data["product_id_encoded"] = product_id_lookup(reviews_data["productId"])
+reviews_data["rating"] = reviews_data["rating"].astype(float)  # Đảm bảo rating là số thực
+
+# Ghép dữ liệu sản phẩm vào reviews_data theo productId
+merged_data = reviews_data.merge(product_data, on="productId", how="left")
+merged_data["brand_encoded"] = brand_lookup(merged_data["brand"])
+merged_data["category_encoded"] = category_lookup(merged_data["category"])
+merged_data["classify_encoded"] = classify_lookup(merged_data["classify"])
+
