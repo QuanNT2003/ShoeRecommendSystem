@@ -71,3 +71,24 @@ merged_data["brand_encoded"] = brand_lookup(merged_data["brand"])
 merged_data["category_encoded"] = category_lookup(merged_data["category"])
 merged_data["classify_encoded"] = classify_lookup(merged_data["classify"])
 
+# Tạo Dataset TensorFlow
+train = tf.data.Dataset.from_tensor_slices({
+    "user_id": tf.cast(merged_data["user_id_encoded"].values, tf.int32),
+    "product_id": tf.cast(merged_data["product_id_encoded"].values, tf.int32),
+    "brand": tf.cast(merged_data["brand_encoded"].values, tf.int32),
+    "category": tf.cast(merged_data["category_encoded"].values, tf.int32),
+    "classify": tf.cast(merged_data["classify_encoded"].values, tf.int32),
+    "rating": tf.cast(merged_data["rating"].values, tf.float32)
+}).batch(512)
+
+test = tf.data.Dataset.from_tensor_slices({
+    "user_id": tf.cast(merged_data["user_id_encoded"].values, tf.int32),
+    "product_id": tf.cast(merged_data["product_id_encoded"].values, tf.int32),
+    "brand": tf.cast(merged_data["brand_encoded"].values, tf.int32),
+    "category": tf.cast(merged_data["category_encoded"].values, tf.int32),
+    "classify": tf.cast(merged_data["classify_encoded"].values, tf.int32),
+    "rating": tf.cast(merged_data["rating"].values, tf.float32)
+}).batch(512).cache()
+
+# Tạo Dataset cho product_ids
+products_dataset = tf.data.Dataset.from_tensor_slices(product_ids).map(lambda x: tf.strings.as_string(x))
