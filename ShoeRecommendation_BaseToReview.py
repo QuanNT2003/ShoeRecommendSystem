@@ -96,22 +96,22 @@ products_dataset = tf.data.Dataset.from_tensor_slices(product_ids).map(lambda x:
 class RecommendationModel(tfrs.Model):
     def __init__(self, user_vocab_size, product_vocab_size, embedding_dim=32):
         super().__init__()
-        # Embedding layers
         self.user_embedding = Embedding(input_dim=user_vocab_size + 1, output_dim=embedding_dim)
         self.product_embedding = Embedding(input_dim=product_vocab_size + 1, output_dim=embedding_dim)
-
-        # Task
         self.task = tfrs.tasks.Retrieval(metrics=tfrs.metrics.FactorizedTopK(
             candidates=products_dataset.batch(128).map(self.product_embedding)
         ))
 
     def compute_loss(self, features, training=False):
-        # Embed users and products
+        # Kiểm tra kiểu dữ liệu
+        tf.debugging.assert_type(features["user_id"], tf.int32)
+        tf.debugging.assert_type(features["product_id"], tf.int32)
+
         user_embeddings = self.user_embedding(features["user_id"])
         product_embeddings = self.product_embedding(features["product_id"])
 
-        # Compute loss for retrieval task
         return self.task(user_embeddings, product_embeddings)
+
 
 # Số lượng unique user và sản phẩm
 user_vocab_size = len(user_ids)
