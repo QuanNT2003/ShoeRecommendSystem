@@ -97,8 +97,8 @@ class RecommendationModel(tfrs.Model):
     def __init__(self, user_vocab_size, product_vocab_size, embedding_dim=32):
         super().__init__()
         # Embedding layers
-        self.user_embedding = Embedding(input_dim=user_vocab_size, output_dim=embedding_dim)
-        self.product_embedding = Embedding(input_dim=product_vocab_size, output_dim=embedding_dim)
+        self.user_embedding = Embedding(input_dim=user_vocab_size + 1, output_dim=embedding_dim)
+        self.product_embedding = Embedding(input_dim=product_vocab_size + 1, output_dim=embedding_dim)
 
         # Task
         self.task = tfrs.tasks.Retrieval(metrics=tfrs.metrics.FactorizedTopK(
@@ -112,7 +112,6 @@ class RecommendationModel(tfrs.Model):
 
         # Compute loss for retrieval task
         return self.task(user_embeddings, product_embeddings)
-
 
 # Số lượng unique user và sản phẩm
 user_vocab_size = len(user_ids)
