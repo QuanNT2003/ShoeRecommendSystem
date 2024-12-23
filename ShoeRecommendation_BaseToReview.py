@@ -93,37 +93,57 @@ test = tf.data.Dataset.from_tensor_slices({
 # Tạo Dataset cho product_ids
 products_dataset = tf.data.Dataset.from_tensor_slices(product_ids).map(lambda x: tf.strings.as_string(x))
 
-class ProductRecommendationModel(tfrs.Model):
-    def __init__(self, user_ids, product_ids):
+# Định nghĩa lớp mô hình khuyến nghị
+class PersonalizedRecommendationModel(tfrs.Model):
+    def __init__(self):
         super().__init__()
+        embedding_dim = 32
 
-        # Tạo embedding cho người dùng và sản phẩm
-        self.user_embedding = tf.keras.layers.Embedding(input_dim=len(user_ids) + 1, output_dim=32)
-        self.product_embedding_layer = tf.keras.layers.Embedding(input_dim=len(product_ids) + 1, output_dim=32)
+        # Embedding for users
+        self.user_embedding = tf.keras.Sequential([
+            Embedding(len(user_ids) + 1, embedding_dim)
+        ])
 
-        # Tạo lớp BruteForce cho candidates với lớp embedding của sản phẩm
-        self.candidate_model = tfrs.layers.factorized_top_k.BruteForce(self.product_embedding_layer)
+        # Embedding for products and product features
+        self.product_embedding = tf.keras.Sequential([
+            Embedding(len(product_ids) + 1, embedding_dim)
+        ])
+        self.brand_embedding = Embedding(len(brands) + 1, embedding_dim)
+        self.category_embedding = Embedding(len(categories) + 1, embedding_dim)
+        self.classify_embedding = Embedding(len(classifies) + 1, embedding_dim)
 
-        # Thiết lập nhiệm vụ truy xuất với lớp BruteForce
-        self.task = tfrs.tasks.Retrieval(metrics=tfrs.metrics.FactorizedTopK(candidates=self.candidate_model))
+        # Dense layer to project combined embeddings to the correct dimension
+        self.embedding_projection = tf.keras.layers.Dense(embedding_dim)
+
+        # FactorizedTopK layer for recommendation retrieval
+        self.task = tfrs.tasks.Retrieval(
+            metrics=tfrs.metrics.FactorizedTopK(
+                candidates=tf.data.Dataset.from_tensor_slices(product_ids).map(self.product_embedding)
+            )
+        )
 
     def compute_loss(self, features, training=False):
-        # Lấy embedding cho user và product
-        user_embeddings = self.user_embedding(features["user"])
-        product_embeddings = self.product_embedding_layer(features["productId"])
+        # Embedding lookup
+        user_emb = self.user_embedding(features["user_id"])
+        product_emb = self.product_embedding(features["product_id"])
 
-        # Đảm bảo rằng cả hai embedding đều có kiểu float32
-        user_embeddings = tf.cast(user_embeddings, tf.float32)
-        product_embeddings = tf.cast(product_embeddings, tf.float32)
+        # Ensure user_emb and product_emb have the correct shape
+        user_emb = tf.reshape(user_emb, [-1, user_emb.shape[-1]])
+        product_emb = tf.reshape(product_emb, [-1, product_emb.shape[-1]])
 
-        # Kiểm tra kích thước
-        print("User embeddings shape:", user_embeddings.shape)
-        print("Product embeddings shape:", product_embeddings.shape)
+        # Embedding for additional product features
+        brand_emb = self.brand_embedding(features["brand"])
+        category_emb = self.category_embedding(features["category"])
+        classify_emb = self.classify_embedding(features["classify"])
 
-        # Tính toán loss
-        return self.task(user_embeddings, product_embeddings)
+        # Combine all product embeddings and project to match user embedding dimension
+        combined_product_emb = tf.concat([product_emb, brand_emb, category_emb, classify_emb], axis=1)
+        combined_product_emb = self.embedding_projection(combined_product_emb)
+
+        # Calculate loss using user and combined product embeddings
+        return self.task(user_emb, combined_product_emb)
 
 
-model = ProductRecommendationModel()
+model = PersonalizedRecommendationModel()
 model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.1))
 model.fit(train, epochs=5)
