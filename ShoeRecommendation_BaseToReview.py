@@ -105,14 +105,16 @@ class ProductRecommendationModel(tfrs.Model):
         self.candidate_model = tfrs.layers.factorized_top_k.BruteForce(self.product_embedding_layer)
 
         # Thiết lập nhiệm vụ truy xuất với lớp BruteForce
-        self.task = tfrs.tasks.Retrieval(
-            metrics=tfrs.metrics.FactorizedTopK(candidates=self.candidate_model)
-        )
+        self.task = tfrs.tasks.Retrieval(metrics=tfrs.metrics.FactorizedTopK(candidates=self.candidate_model))
 
     def compute_loss(self, features, training=False):
         # Lấy embedding cho user và product
         user_embeddings = self.user_embedding(features["user"])
         product_embeddings = self.product_embedding_layer(features["productId"])
+
+        # Đảm bảo rằng cả hai embedding đều có kiểu float32
+        user_embeddings = tf.cast(user_embeddings, tf.float32)
+        product_embeddings = tf.cast(product_embeddings, tf.float32)
 
         # Kiểm tra kích thước
         print("User embeddings shape:", user_embeddings.shape)
