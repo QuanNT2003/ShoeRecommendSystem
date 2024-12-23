@@ -93,35 +93,35 @@ test = tf.data.Dataset.from_tensor_slices({
 # Tạo Dataset cho product_ids
 products_dataset = tf.data.Dataset.from_tensor_slices(product_ids).map(lambda x: tf.strings.as_string(x))
 
-class RecommendationModel(tfrs.Model):
-    def __init__(self, user_vocab_size, product_vocab_size, embedding_dim=32):
+class ProductRecommendationModel(tfrs.Model):
+    def __init__(self, user_ids, product_ids):
         super().__init__()
-        self.user_embedding = Embedding(input_dim=user_vocab_size + 1, output_dim=embedding_dim)
-        self.product_embedding = Embedding(input_dim=product_vocab_size + 1, output_dim=embedding_dim)
-        self.task = tfrs.tasks.Retrieval(metrics=tfrs.metrics.FactorizedTopK(
-            candidates=products_dataset.batch(128).map(self.product_embedding)
-        ))
+
+        # Tạo embedding cho người dùng và sản phẩm
+        self.user_embedding = tf.keras.layers.Embedding(input_dim=len(user_ids) + 1, output_dim=32)
+        self.product_embedding_layer = tf.keras.layers.Embedding(input_dim=len(product_ids) + 1, output_dim=32)
+
+        # Tạo lớp BruteForce cho candidates với lớp embedding của sản phẩm
+        self.candidate_model = tfrs.layers.factorized_top_k.BruteForce(self.product_embedding_layer)
+
+        # Thiết lập nhiệm vụ truy xuất với lớp BruteForce
+        self.task = tfrs.tasks.Retrieval(
+            metrics=tfrs.metrics.FactorizedTopK(candidates=self.candidate_model)
+        )
 
     def compute_loss(self, features, training=False):
-        # Kiểm tra kiểu dữ liệu
-        tf.debugging.assert_type(features["user_id"], tf.int32)
-        tf.debugging.assert_type(features["product_id"], tf.int32)
+        # Lấy embedding cho user và product
+        user_embeddings = self.user_embedding(features["user"])
+        product_embeddings = self.product_embedding_layer(features["productId"])
 
-        user_embeddings = self.user_embedding(features["user_id"])
-        product_embeddings = self.product_embedding(features["product_id"])
+        # Kiểm tra kích thước
+        print("User embeddings shape:", user_embeddings.shape)
+        print("Product embeddings shape:", product_embeddings.shape)
 
+        # Tính toán loss
         return self.task(user_embeddings, product_embeddings)
 
 
-# Số lượng unique user và sản phẩm
-user_vocab_size = len(user_ids)
-product_vocab_size = len(product_ids)
-
-# Khởi tạo mô hình
-model = RecommendationModel(user_vocab_size=user_vocab_size, product_vocab_size=product_vocab_size)
-
-# Compile
+model = ProductRecommendationModel()
 model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.1))
-
-# Huấn luyện
-history = model.fit(train, validation_data=test, epochs=5)
+model.fit(train, epochs=5)
