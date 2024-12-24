@@ -94,54 +94,47 @@ test = tf.data.Dataset.from_tensor_slices({
 products_dataset = tf.data.Dataset.from_tensor_slices(product_ids).map(lambda x: tf.strings.as_string(x))
 
 # Định nghĩa lớp mô hình khuyến nghị
-class PersonalizedRecommendationModel(tfrs.Model):
+class ProductRecommendationModel(tfrs.Model):
     def __init__(self):
         super().__init__()
-        embedding_dim = 32
-
-        # Embedding for users
+        # Embedding cho user và product với đầu vào là string
+        embedding_dimension = 32
         self.user_embedding = tf.keras.Sequential([
-            Embedding(len(user_ids) + 1, embedding_dim)
+            tf.keras.layers.StringLookup(vocabulary=user_ids, mask_token=None),
+            tf.keras.layers.Embedding(len(user_ids) + 1, embedding_dimension)
         ])
-
-        # Embedding for products and product features
         self.product_embedding = tf.keras.Sequential([
-            Embedding(len(product_ids) + 1, embedding_dim)
+            tf.keras.layers.StringLookup(vocabulary=product_ids, mask_token=None),
+            tf.keras.layers.Embedding(len(product_ids) + 1, embedding_dimension)
         ])
-        self.brand_embedding = Embedding(len(brands) + 1, embedding_dim)
-        self.category_embedding = Embedding(len(categories) + 1, embedding_dim)
-        self.classify_embedding = Embedding(len(classifies) + 1, embedding_dim)
 
-        # Dense layer to project combined embeddings to the correct dimension
-        self.embedding_projection = tf.keras.layers.Dense(embedding_dim)
-
-        # FactorizedTopK layer for recommendation retrieval
-        self.task = tfrs.tasks.Retrieval(
-            metrics=tfrs.metrics.FactorizedTopK(
-                candidates=tf.data.Dataset.from_tensor_slices(product_ids).map(self.product_embedding)
-            )
-        )
+        # Khởi tạo FactorizedTopK với Dataset chứa các sản phẩm
+        self.task = tfrs.tasks.Retrieval(metrics=tfrs.metrics.FactorizedTopK(candidates=products_dataset.batch(128).map(self.product_embedding)))
 
     def compute_loss(self, features, training=False):
-        # Embedding lookup
-        user_emb = self.user_embedding(features["user_id"])
-        product_emb = self.product_embedding(features["product_id"])
+        # Lấy user_id và product_id từ features
+        user_embeddings = self.user_embedding(features["user_id_encoded"])
+        product_embeddings = self.product_embedding(features["product_id_encoded"])
 
-        # Ensure user_emb and product_emb have the correct shape
-        user_emb = tf.reshape(user_emb, [-1, user_emb.shape[-1]])
-        product_emb = tf.reshape(product_emb, [-1, product_emb.shape[-1]])
+        # Tính toán loss
+        return self.task(user_embeddings, product_embeddings)
 
-        # Embedding for additional product features
-        brand_emb = self.brand_embedding(features["brand"])
-        category_emb = self.category_embedding(features["category"])
-        classify_emb = self.classify_embedding(features["classify"])
+    def predict(self, user_id, num_recommendations=5):
+        # Chuyển đổi user_id thành mã số đã được mã hóa
+        user_id_encoded = user_id_lookup(user_id)  # Chuyển đổi user_id thành mã số
+        user_id_encoded = tf.convert_to_tensor([user_id_encoded], dtype=tf.int64)  # Chuyển đổi sang tensor int64
 
-        # Combine all product embeddings and project to match user embedding dimension
-        combined_product_emb = tf.concat([product_emb, brand_emb, category_emb, classify_emb], axis=1)
-        combined_product_emb = self.embedding_projection(combined_product_emb)
+        # Tính toán nhúng người dùng
+        user_embedding = self.user_embedding(user_id_encoded)
 
-        # Calculate loss using user and combined product embeddings
-        return self.task(user_emb, combined_product_emb)
+        # Tính toán nhúng cho tất cả sản phẩm
+        product_embeddings = self.product_embedding(tf.constant(product_ids))
+        scores = tf.matmul(user_embedding, product_embeddings, transpose_b=True)
+
+        # Lấy mã sản phẩm từ scores
+        recommended_product_ids = product_ids[np.argsort(scores.numpy()[0])[-num_recommendations:][::-1]]
+
+        return recommended_product_ids
 
 
 model = PersonalizedRecommendationModel()
