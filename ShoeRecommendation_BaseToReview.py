@@ -141,6 +141,30 @@ class PersonalizedRecommendationModel(tfrs.Model):
         # Compute loss with user and combined product embeddings
         return self.task(user_emb, combined_product_emb)
 
+# Hàm gợi ý sản phẩm cho người dùng
+def recommend_products(user_id, num_recommendations=5):
+    user_encoded = user_id_lookup(tf.constant([str(user_id)]))
+    user_emb = model.user_embedding(user_encoded)
+    product_embs = model.candidate_model(product_id_lookup(product_ids))
+    scores = tf.linalg.matmul(user_emb, tf.transpose(product_embs))
+    recommended_product_ids = product_ids[np.argsort(scores.numpy()[0])[-num_recommendations:][::-1]]
+    return recommended_product_ids
+
 model = PersonalizedRecommendationModel()
 model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.1))
 model.fit(train, epochs=5)
+
+# Đánh giá mô hình trên tập kiểm thử
+test_results = model.evaluate(test, verbose=2)
+
+# In ra loss và các chỉ số độ chính xác
+print(f"Test Loss: {test_results[0]:.4f}")
+print(f"Top 1 Categorical Accuracy: {test_results[1]:.4f}")
+print(f"Top 5 Categorical Accuracy: {test_results[2]:.4f}")
+print(f"Top 10 Categorical Accuracy: {test_results[3]:.4f}")
+print(f"Top 50 Categorical Accuracy: {test_results[4]:.4f}")
+print(f"Top 100 Categorical Accuracy: {test_results[5]:.4f}")
+
+user_example = user_ids[4]
+recommended_products = recommend_products(user_example)
+print(f"Recommended Products for User '{user_example}': {recommended_products}")
