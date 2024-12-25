@@ -94,61 +94,83 @@ test = tf.data.Dataset.from_tensor_slices({
 products_dataset = tf.data.Dataset.from_tensor_slices(product_ids).map(lambda x: tf.strings.as_string(x))
 
 # Định nghĩa lớp mô hình khuyến nghị
+# Định nghĩa lớp mô hình khuyến nghị
 class PersonalizedRecommendationModel(tfrs.Model):
-    def __init__(self):
+    def __init__(self, use_factorized_top_k=True):
         super().__init__()
         embedding_dim = 32
 
-        # Embedding layers for user, product, brand, category, and classify
-        self.user_embedding = tf.keras.Sequential([
-            Embedding(len(user_ids) + 1, embedding_dim)
-        ])
+        # Embedding cho từng trường
+        self.user_embedding = tf.keras.Sequential([Embedding(len(user_ids) + 1, embedding_dim)])
+        self.product_embedding = tf.keras.Sequential([Embedding(len(product_ids) + 1, embedding_dim)])
 
-        self.product_embedding = tf.keras.Sequential([
-            Embedding(len(product_ids) + 1, embedding_dim)
-        ])
+        # Khởi tạo embedding cho brand, category, và classify ngay cả khi không dùng FactorizedTopK
         self.brand_embedding = Embedding(len(brands) + 1, embedding_dim)
         self.category_embedding = Embedding(len(categories) + 1, embedding_dim)
         self.classify_embedding = Embedding(len(classifies) + 1, embedding_dim)
 
-        # Candidate model for FactorizedTopK
-        self.candidate_model = tf.keras.Sequential([
-            Embedding(len(product_ids) + 1, embedding_dim)
-        ])
+        # Chuyển các giá trị chuỗi thành số chỉ mục sử dụng StringLookup
+        self.product_id_lookup = tf.keras.layers.StringLookup(vocabulary=product_ids, mask_token=None, oov_token="[UNK]")
 
-        # Projection layer to reduce dimensionality of combined embeddings
+        # Projection cuối
         self.final_projection = tf.keras.layers.Dense(embedding_dim)
 
-        # Define retrieval task with FactorizedTopK for recommendations
-        self.task = tfrs.tasks.Retrieval(
-            metrics=tfrs.metrics.FactorizedTopK(
-                candidates=products_dataset.batch(512).map(lambda x: self.candidate_model(product_id_lookup(x)))
+        self.use_factorized_top_k = use_factorized_top_k
+        if use_factorized_top_k:
+            self.task = tfrs.tasks.Retrieval(
+                metrics=tfrs.metrics.FactorizedTopK(
+                    candidates=tf.data.Dataset.from_tensor_slices(
+                        {"product_id": tf.constant(product_ids)}
+                    ).batch(512).map(lambda x: self.product_embedding(self.product_id_lookup(x["product_id"])))
+                )
             )
+        else:
+            self.task = tfrs.tasks.Retrieval()
+
+    def call(self, inputs):
+        user_emb = self.user_embedding(inputs["user_id"])
+        product_emb = self.product_embedding(inputs["product_id"])
+        brand_emb = self.brand_embedding(inputs["brand"])
+        category_emb = self.category_embedding(inputs["category"])
+        classify_emb = self.classify_embedding(inputs["classify"])
+
+        # Kết hợp embedding
+        combined_product_emb = tf.concat(
+            [product_emb, brand_emb, category_emb, classify_emb], axis=-1
         )
-
-    def compute_loss(self, features, training=False):
-        # Get embeddings for user and product
-        user_emb = self.user_embedding(features["user_id"])
-        product_emb = self.product_embedding(features["product_id"])
-        brand_emb = self.brand_embedding(features["brand"])
-        category_emb = self.category_embedding(features["category"])
-        classify_emb = self.classify_embedding(features["classify"])
-
-        # Concatenate embeddings and project to the expected dimension
-        combined_product_emb = tf.concat([product_emb, brand_emb, category_emb, classify_emb], axis=-1)
         combined_product_emb = self.final_projection(combined_product_emb)
 
-        # Compute loss with user and combined product embeddings
-        return self.task(user_emb, combined_product_emb)
+        return user_emb, combined_product_emb
+
+    def compute_loss(self, features, training=False):
+        user_emb, combined_product_emb = self(features)
+
+        # Tích hợp rating làm trọng số trong tính toán loss
+        weights = features["rating"]  # Dùng rating làm trọng số
+        loss = self.task(user_emb, combined_product_emb, sample_weight=weights)
+
+        return loss
+
+
 
 # Hàm gợi ý sản phẩm cho người dùng
-def recommend_products(user_id, num_recommendations=5):
+def recommend_products(user_id, num_recommendations=10):
+    # Chuyển đổi user_id thành encoding
     user_encoded = user_id_lookup(tf.constant([str(user_id)]))
+
+    # Lấy embedding của user
     user_emb = model.user_embedding(user_encoded)
-    product_embs = model.candidate_model(product_id_lookup(product_ids))
+
+    # Lấy embedding của sản phẩm (dùng product_embedding từ mô hình)
+    product_embs = model.product_embedding(product_id_lookup(product_ids))
+
+    # Tính toán độ tương thích giữa user và sản phẩm
     scores = tf.linalg.matmul(user_emb, tf.transpose(product_embs))
+
+    # Lấy các sản phẩm có điểm số cao nhất
     recommended_product_ids = product_ids[np.argsort(scores.numpy()[0])[-num_recommendations:][::-1]]
-    return recommended_product_ids
+
+    return recommended_product_ids.tolist()
 
 model = PersonalizedRecommendationModel()
 model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.1))
