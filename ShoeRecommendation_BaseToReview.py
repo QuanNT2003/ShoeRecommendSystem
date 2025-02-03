@@ -44,11 +44,11 @@ reviews_data = reviews_data.astype(str)
 
 user_ids = reviews_data["user"].unique().astype(str)
 user_ids = np.array(user_ids)  # Đảm bảo user_ids là một mảng numpy
-print("User IDs:", user_ids)
+#print("User IDs:", user_ids)
 
 product_ids = product_data["productId"].unique().astype(str)
 product_ids = np.array(product_ids)  # Đảm bảo product_ids là một mảng numpy
-print("Product IDs:", product_ids)
+# print("Product IDs:", product_ids)
 
 brands = product_data["brand"].unique().astype(str)
 categories = product_data["category"].unique().astype(str)
@@ -74,25 +74,28 @@ merged_data["classify_encoded"] = classify_lookup(merged_data["classify"])
 
 # Kiểm tra lại các cột mới mã hóa
 print("\nEncoded Reviews Data Sample:")
-print(reviews_data[["user", "user_id_encoded", "productId", "product_id_encoded" , "rating"]].apply)
+# print(reviews_data[["user", "user_id_encoded", "productId", "product_id_encoded" , "rating"]].apply)
 
-# Tạo Dataset TensorFlow
+# Chia dữ liệu thành 80% train, 20% test
+train_data, test_data = train_test_split(merged_data, test_size=0.2, random_state=42)
+
+# Tạo Dataset TensorFlow từ dữ liệu đã chia
 train = tf.data.Dataset.from_tensor_slices({
-    "user_id": tf.cast(merged_data["user_id_encoded"].values, tf.int32),
-    "product_id": tf.cast(merged_data["product_id_encoded"].values, tf.int32),
-    "brand": tf.cast(merged_data["brand_encoded"].values, tf.int32),
-    "category": tf.cast(merged_data["category_encoded"].values, tf.int32),
-    "classify": tf.cast(merged_data["classify_encoded"].values, tf.int32),
-    "rating": tf.cast(merged_data["rating"].values, tf.float32)
+    "user_id": tf.cast(train_data["user_id_encoded"].values, tf.int32),
+    "product_id": tf.cast(train_data["product_id_encoded"].values, tf.int32),
+    "brand": tf.cast(train_data["brand_encoded"].values, tf.int32),
+    "category": tf.cast(train_data["category_encoded"].values, tf.int32),
+    "classify": tf.cast(train_data["classify_encoded"].values, tf.int32),
+    "rating": tf.cast(train_data["rating"].values, tf.float32)
 }).batch(512)
 
 test = tf.data.Dataset.from_tensor_slices({
-    "user_id": tf.cast(merged_data["user_id_encoded"].values, tf.int32),
-    "product_id": tf.cast(merged_data["product_id_encoded"].values, tf.int32),
-    "brand": tf.cast(merged_data["brand_encoded"].values, tf.int32),
-    "category": tf.cast(merged_data["category_encoded"].values, tf.int32),
-    "classify": tf.cast(merged_data["classify_encoded"].values, tf.int32),
-    "rating": tf.cast(merged_data["rating"].values, tf.float32)
+    "user_id": tf.cast(test_data["user_id_encoded"].values, tf.int32),
+    "product_id": tf.cast(test_data["product_id_encoded"].values, tf.int32),
+    "brand": tf.cast(test_data["brand_encoded"].values, tf.int32),
+    "category": tf.cast(test_data["category_encoded"].values, tf.int32),
+    "classify": tf.cast(test_data["classify_encoded"].values, tf.int32),
+    "rating": tf.cast(test_data["rating"].values, tf.float32)
 }).batch(512).cache()
 
 # Tạo Dataset cho product_ids
@@ -102,7 +105,7 @@ products_dataset = tf.data.Dataset.from_tensor_slices(product_ids).map(lambda x:
 class PersonalizedRecommendationModel(tfrs.Model):
     def __init__(self, use_factorized_top_k=True):
         super().__init__()
-        embedding_dim = 32
+        embedding_dim = 16
 
         # Embedding cho từng trường
         self.user_embedding = tf.keras.Sequential([Embedding(len(user_ids) + 1, embedding_dim)])
@@ -151,6 +154,8 @@ class PersonalizedRecommendationModel(tfrs.Model):
 
         # Tích hợp rating làm trọng số trong tính toán loss
         weights = features["rating"]  # Dùng rating làm trọng số
+
+        # Tính toán và cập nhật embedding
         loss = self.task(user_emb, combined_product_emb, sample_weight=weights)
 
         return loss
@@ -164,12 +169,15 @@ def recommend_products(user_id, num_recommendations=10):
 
     # Lấy embedding của user
     user_emb = model.user_embedding(user_encoded)
+    print(f"User ID: { user_id},user_encoded: { user_encoded} , Vector: {user_emb}")
 
     # Lấy embedding của sản phẩm (dùng product_embedding từ mô hình)
     product_embs = model.product_embedding(product_id_lookup(product_ids))
+    # print(f"Product ID: { product_ids}, Vector: {product_embs}")
 
     # Tính toán độ tương thích giữa user và sản phẩm
     scores = tf.linalg.matmul(user_emb, tf.transpose(product_embs))
+    # print(f"scores: { scores}")
 
     # Lấy các sản phẩm có điểm số cao nhất
     recommended_product_ids = product_ids[np.argsort(scores.numpy()[0])[-num_recommendations:][::-1]]
@@ -178,19 +186,27 @@ def recommend_products(user_id, num_recommendations=10):
 
 # Huấn luyện mô hình
 model = PersonalizedRecommendationModel()
-model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.1))
-model.fit(train, epochs=5)
+model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.05))
+
+print("User embedding trước huấn luyện:", model.user_embedding.weights[0].numpy())  # In 5 vector đầu tiên
+print("Product embedding trước huấn luyện:", model.product_embedding.weights[0].numpy())
+
+model.fit(train, epochs=10)
+
+# In embedding sau khi huấn luyện
+print("User embedding sau huấn luyện:", model.user_embedding.weights[0].numpy())
+print("Product embedding sau huấn luyện:", model.product_embedding.weights[0].numpy())
 
 # Đánh giá mô hình trên tập kiểm thử
 test_results = model.evaluate(test, verbose=2)
 
 # In ra loss và các chỉ số độ chính xác
 print(f"Test Loss: {test_results[0]:.4f}")
+# print(test_results)
 print(f"Top 1 Categorical Accuracy: {test_results[1]:.4f}")
 print(f"Top 5 Categorical Accuracy: {test_results[2]:.4f}")
 print(f"Top 10 Categorical Accuracy: {test_results[3]:.4f}")
 print(f"Top 50 Categorical Accuracy: {test_results[4]:.4f}")
-print(f"Top 100 Categorical Accuracy: {test_results[5]:.4f}")
 
 # Ví dụ gợi ý sản phẩm cho một người dùng
 user_example = user_ids[0]
