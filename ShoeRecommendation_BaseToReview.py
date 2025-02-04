@@ -77,7 +77,7 @@ print("\nEncoded Reviews Data Sample:")
 # print(reviews_data[["user", "user_id_encoded", "productId", "product_id_encoded" , "rating"]].apply)
 
 # Chia dữ liệu thành 80% train, 20% test
-train_data, test_data = train_test_split(merged_data, test_size=0.2, random_state=42)
+train_data, test_data = train_test_split(merged_data, test_size=0.3, random_state=42)
 
 # Tạo Dataset TensorFlow từ dữ liệu đã chia
 train = tf.data.Dataset.from_tensor_slices({
@@ -160,8 +160,6 @@ class PersonalizedRecommendationModel(tfrs.Model):
 
         return loss
 
-
-
 # Hàm gợi ý sản phẩm cho người dùng
 def recommend_products(user_id, num_recommendations=10):
     # Chuyển đổi user_id thành encoding
@@ -173,7 +171,6 @@ def recommend_products(user_id, num_recommendations=10):
 
     # Lấy embedding của sản phẩm (dùng product_embedding từ mô hình)
     product_embs = model.product_embedding(product_id_lookup(product_ids))
-    # print(f"Product ID: { product_ids}, Vector: {product_embs}")
 
     # Tính toán độ tương thích giữa user và sản phẩm
     scores = tf.linalg.matmul(user_emb, tf.transpose(product_embs))
@@ -191,7 +188,7 @@ model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.05))
 print("User embedding trước huấn luyện:", model.user_embedding.weights[0].numpy())  # In 5 vector đầu tiên
 print("Product embedding trước huấn luyện:", model.product_embedding.weights[0].numpy())
 
-model.fit(train, epochs=10)
+model.fit(train, epochs=50)
 
 # In embedding sau khi huấn luyện
 print("User embedding sau huấn luyện:", model.user_embedding.weights[0].numpy())
